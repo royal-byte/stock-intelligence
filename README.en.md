@@ -90,6 +90,14 @@ flowchart TB
 
 ### Steps
 
+Option 1 — skills installer (**requires a public repo**; it only copies files into the skills directory — the runtime prerequisites above still apply):
+
+```bash
+npx skills add royal-byte/stock-intelligence
+```
+
+Option 2 — git clone (works for private repos too):
+
 ```bash
 # Clone into your agent's skills directory
 git clone https://github.com/royal-byte/stock-intelligence.git ~/.agents/skills/stock-intelligence

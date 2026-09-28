@@ -90,6 +90,14 @@ flowchart TB
 
 ### 安装步骤
 
+方式一：skills 安装器（**需仓库公开**；只负责把文件拷进 skills 目录，运行仍需上面的前置依赖）：
+
+```bash
+npx skills add royal-byte/stock-intelligence
+```
+
+方式二：git clone（私有仓库也适用）：
+
 ```bash
 # 放进 agent 的 skills 目录（ZCode / Claude Code 等通用写法）
 git clone https://github.com/royal-byte/stock-intelligence.git ~/.agents/skills/stock-intelligence
