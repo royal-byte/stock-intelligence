@@ -1,0 +1,9 @@
+{
+  "tickers": ["INTC", "META", "GOOGL", "COHR", "AXTI", "MRVL", "NFLX", "SNDK", "NVDA", "AMAT", "AAOI", "CBRS", "NOK", "TSM"],
+  "clusters": {
+    "AI硬件/算力链": ["INTC", "SNDK", "MRVL", "COHR", "AXTI", "AAOI", "AMAT", "NVDA", "CBRS", "TSM"],
+    "平台/应用": ["META", "GOOGL"],
+    "独立": ["NFLX", "NOK"]
+  },
+  "_doc": "clusters 用于 portfolio 模式的相关性簇标注（同簇≈同一笔交易）；纯列表格式仍向后兼容"
+}
