@@ -1,5 +1,7 @@
 # stock-intelligence
 
+**中文** | [English](README.en.md)
+
 > X 舆情 × 期权定价 → 四象限 Regime。一个给 coding agent 用的美股市场状态研究 skill。
 
 **输出永远是描述性市场状态，不是买卖信号，不构成投资建议。**
