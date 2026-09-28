@@ -80,6 +80,88 @@ flowchart TB
 | "State of my portfolio" | portfolio | `uv run run.py --mode portfolio` |
 | "Time series / panel" | panel | `uv run panel.py --ticker NVDA` |
 
+## Example output
+
+Real fused output from `--ticker NVDA --mode full` run off-hours on 2026-09-26 (fv2 / schema 1.2, excerpt):
+
+```json
+{
+  "meta": {
+    "schema_version": "1.2",
+    "fusion_version": "fv2",
+    "options_version": "ov2",
+    "mode": "full",
+    "run_at": "2026-09-26T10:45:50",
+    "us_market_session": "closed"
+  },
+  "narrative": {
+    "net_index": 0.035,
+    "verdict": "中性",
+    "polarization": 0.366,
+    "polarization_level": "Medium",
+    "extreme_consensus": false,
+    "n_effective": 36,
+    "unique_effective_authors": 40
+  },
+  "options": {
+    "spot": 225.07,
+    "atm_iv_near": 0.2664,
+    "atm_iv_next": 0.2845,
+    "term_slope_vpt": 1.8,
+    "rr25_vpt": -2.1,
+    "pc_oi": 1.068,
+    "gex_usd_per_1pct": 203534
+  },
+  "options.data_quality": {
+    "level": "MEDIUM",
+    "status": "frozen",
+    "stale": false,
+    "data_as_of": "2026-09-25T16:00-04:00",
+    "age_minutes": 406,
+    "reasons": ["frozen_offhours"]
+  },
+  "options.substates": {
+    "direction": { "state": "LEAN_BEARISH", "evidence": ["rr25 -2.1vpt"] },
+    "volatility": { "atm_iv": 0.2664, "read": "normal", "term_slope_vpt": 1.8, "term": "flat" },
+    "positioning": { "pc_oi": 1.068, "pc_vol": 0.513, "gex_sign": "positive", "read": "balanced" },
+    "note": "direction from rr25+pc_oi only; IV/term/GEX informational"
+  },
+  "analyst": {
+    "n_analysts": 59,
+    "recommendation_key": "strong_buy",
+    "breakdown": { "strongBuy": 10, "buy": 48, "hold": 2, "sell": 1, "strongSell": 0 },
+    "target_mean": 327.7,
+    "upside_pct": 0.456,
+    "forward_pe": 14.351548
+  },
+  "data_quality": {
+    "sentiment": { "level": "HIGH", "n_effective": 36, "unique_authors": 40, "age_hours": 0.0 },
+    "narrative_options_same_session": true,
+    "gates": []
+  },
+  "fusion": {
+    "narrative_state": "NEUTRAL",
+    "options_state": "LEAN_BEARISH",
+    "options_evidence": ["rr25 -2.1vpt"],
+    "alignment": "MIXED",
+    "relationship": "MIXED",
+    "pricing_direction": "LEAN_BEARISH",
+    "crowding": "LOW",
+    "fusion_gate": { "fused": true, "reasons": [] },
+    "regime_label": "两侧均中性（无状态）",
+    "fusion_version": "fv2"
+  }
+}
+```
+
+How to read it:
+
+- Narrative is neutral (net index +0.035, within ±0.15; 40 unique authors / 36 effective posts → HIGH confidence), options lean bearish (rr25 −2.1 vpt, PC OI 1.07) → `alignment=MIXED`
+- `regime_label` is display copy only; directional information stays in `pricing_direction=LEAN_BEARISH` — never squashed into a single score
+- Off-hours options chains are frozen values (`status=frozen`, 6.8h since close ≤ 20h): honestly flagged `MEDIUM` and fusion proceeds; past 20h the output becomes `NOT_FUSED` and no Regime is issued
+- `gates: []` = no gate triggered this run (narrative confidence and cross-session checks both passed)
+- Sell-side consensus (59 analysts, strong_buy, +45.6% implied by mean target) is a standalone data point — it **did not enter** the fusion
+
 ## Install
 
 ### Prerequisites

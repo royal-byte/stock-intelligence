@@ -80,6 +80,88 @@ flowchart TB
 | "我的组合什么状态" | portfolio | `uv run run.py --mode portfolio` |
 | "看时间序列 / 面板" | panel | `uv run panel.py --ticker NVDA` |
 
+## 输出示例
+
+2026-09-26 盘外跑 `--ticker NVDA --mode full` 的真实融合输出（fv2 / schema 1.2，节选）：
+
+```json
+{
+  "meta": {
+    "schema_version": "1.2",
+    "fusion_version": "fv2",
+    "options_version": "ov2",
+    "mode": "full",
+    "run_at": "2026-09-26T10:45:50",
+    "us_market_session": "closed"
+  },
+  "narrative": {
+    "net_index": 0.035,
+    "verdict": "中性",
+    "polarization": 0.366,
+    "polarization_level": "Medium",
+    "extreme_consensus": false,
+    "n_effective": 36,
+    "unique_effective_authors": 40
+  },
+  "options": {
+    "spot": 225.07,
+    "atm_iv_near": 0.2664,
+    "atm_iv_next": 0.2845,
+    "term_slope_vpt": 1.8,
+    "rr25_vpt": -2.1,
+    "pc_oi": 1.068,
+    "gex_usd_per_1pct": 203534
+  },
+  "options.data_quality": {
+    "level": "MEDIUM",
+    "status": "frozen",
+    "stale": false,
+    "data_as_of": "2026-09-25T16:00-04:00",
+    "age_minutes": 406,
+    "reasons": ["frozen_offhours"]
+  },
+  "options.substates": {
+    "direction": { "state": "LEAN_BEARISH", "evidence": ["rr25 -2.1vpt"] },
+    "volatility": { "atm_iv": 0.2664, "read": "normal", "term_slope_vpt": 1.8, "term": "flat" },
+    "positioning": { "pc_oi": 1.068, "pc_vol": 0.513, "gex_sign": "positive", "read": "balanced" },
+    "note": "direction from rr25+pc_oi only; IV/term/GEX informational"
+  },
+  "analyst": {
+    "n_analysts": 59,
+    "recommendation_key": "strong_buy",
+    "breakdown": { "strongBuy": 10, "buy": 48, "hold": 2, "sell": 1, "strongSell": 0 },
+    "target_mean": 327.7,
+    "upside_pct": 0.456,
+    "forward_pe": 14.351548
+  },
+  "data_quality": {
+    "sentiment": { "level": "HIGH", "n_effective": 36, "unique_authors": 40, "age_hours": 0.0 },
+    "narrative_options_same_session": true,
+    "gates": []
+  },
+  "fusion": {
+    "narrative_state": "NEUTRAL",
+    "options_state": "LEAN_BEARISH",
+    "options_evidence": ["rr25 -2.1vpt"],
+    "alignment": "MIXED",
+    "relationship": "MIXED",
+    "pricing_direction": "LEAN_BEARISH",
+    "crowding": "LOW",
+    "fusion_gate": { "fused": true, "reasons": [] },
+    "regime_label": "两侧均中性（无状态）",
+    "fusion_version": "fv2"
+  }
+}
+```
+
+怎么读这份输出：
+
+- 叙事层中性（净指数 +0.035，±0.15 内；40 个独立作者 / 36 有效帖 → 置信 HIGH），期权层偏空（rr25 −2.1 vpt、PC OI 1.07）→ `alignment=MIXED`
+- `regime_label` 只是展示文案；方向信息保留在 `pricing_direction=LEAN_BEARISH`，不合成单一分数
+- 盘外时段期权链是冻结值（`status=frozen`，距收盘 6.8h ≤ 20h）：如实标注 `MEDIUM` 并放行融合；若 >20h 会输出 `NOT_FUSED` 并拒绝给 Regime
+- `gates: []` = 本次没触发任何门（叙事置信、跨时段检查均通过）
+- 卖方共识（59 位分析师 strong_buy、目标价隐含 +45.6%）只是独立数据点，**没有参与**融合
+
 ## 安装
 
 ### 前置依赖
