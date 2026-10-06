@@ -55,6 +55,14 @@ cmd /c 'cd /d C:\Users\Roy\.agents\skills\stock-intelligence && uv run run.py --
 
 - 叙事层：`TYPESAFE_API_KEY`（Jev）；opencli + Chrome 扩展 + 登录 x.com
   （`opencli doctor` 检查；多 profile 时 `opencli profile use <chrome>`）
+- 浏览器实例白名单（默认拒绝）：`browser.json` 绑定唯一生产浏览器 ——
+  `allow_profiles: ["jbtu4mh6"]`（Chrome）、`chrome_path` 绝对路径（永不 `start chrome`）、
+  `health_url: https://www.google.com/`（中性检查页，与业务源 x.com 分离）；
+  环境变量 `OPENCLI_PROFILES`/`OPENCLI_CHROME_PATH` 可临时覆盖。非白名单实例
+  （退役 Edge/vmawp5gu）被忽略并打印一次，绝不拉起/重试。
+- skill 自带恢复链（有界）：无健康实例→按 `chrome_path` 拉起 Chrome→导航式健康检查→
+  失败重试 1 次→仍失败计 1 次恢复失败，连续 2 次后熔断 fail-fast（不无限重启 Chrome）。
+  铁律：`profile list/bind` 成功≠可用，只有真实导航成功才算健康。
 - 期权层：yfinance 可达（免费、15 分钟延迟、盘外时段为冻结值）
 - 卖方共识：同 yfinance（Yahoo 汇总口径，分桶与 TIKR/FactSet 可能不一致）
 - KOL 名单：`sentiment/accounts.json`（boost 加权 / zero 剔除）

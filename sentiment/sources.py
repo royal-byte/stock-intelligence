@@ -5,11 +5,87 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 import shutil
 import subprocess
 import time
 import urllib.parse
 import urllib.request
+
+# Browser-bridge attach failures (e.g. "attach failed: Cannot access a
+# chrome-extension:// URL of different extension") are profile-local: another
+# connected browser instance usually works. These markers trigger profile fallback.
+_ATTACH_ERR_MARKERS = ("attach failed", "chrome-extension", "profile")
+
+# Production recovery target: launch Chrome by full path, never via `start chrome`
+# (which Windows can redirect to the default browser — here Edge, whose Browser
+# Bridge instance was unhealthy). Override with OPENCLI_CHROME_PATH if needed.
+_CHROME_CANDIDATES = (
+    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+    r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+    os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+)
+_HEALTH_TIMEOUT_S = 60
+# Neutral health-check URL: browser/bridge capability must be judged
+# independently of the business data source. If x.com is down, that is a
+# DATA-SOURCE failure, not a browser failure — never conflste the two.
+_DEFAULT_HEALTH_URL = "https://www.google.com/"
+# Circuit breaker: after this many consecutive failed recovery attempts
+# (launch Chrome + health check), stop relaunching entirely and fail fast.
+# Prevents a data-source outage from escalating into a Chrome kill/start loop.
+_MAX_RECOVERY_FAILURES = 2
+# process-level cache: profile -> bool (True = navigate check passed).
+# `profile list`/`bind` succeeding does NOT prove the browser is drivable —
+# only a real navigation does — so health must be established once per run.
+_profile_health_cache: dict[str, bool] = {}
+_ignored_profiles_reported: set[str] = set()
+_ensure_fail_streak = 0
+
+
+def _load_browser_config() -> dict:
+    """Skill-root browser.json: {"allow_profiles": [..]} — production instances only."""
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "browser.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            cfg = json.load(f)
+        return cfg if isinstance(cfg, dict) else {}
+    except Exception:
+        return {}
+
+
+_BROWSER_CONFIG = _load_browser_config()
+
+
+def _health_url() -> str:
+    return _BROWSER_CONFIG.get("health_url") or _DEFAULT_HEALTH_URL
+
+
+def _chrome_exe() -> str | None:
+    """The one production browser executable (config pin > env > known paths).
+
+    Chrome is not the 'highest priority' option — it is the ONLY allowed
+    production browser; nothing else is ever launched.
+    """
+    exe = os.environ.get("OPENCLI_CHROME_PATH") or _BROWSER_CONFIG.get("chrome_path")
+    if exe and os.path.exists(exe):
+        return exe
+    return next((p for p in _CHROME_CANDIDATES if os.path.exists(p)), None)
+
+
+def _filter_allowed(profiles: list[str]) -> list[str]:
+    """Keep only allow-listed profiles (browser.json allow_profiles, or
+    OPENCLI_PROFILES env override, comma-separated). Empty allow-list = all.
+    Retired/broken instances (e.g. Edge/vmawp5gu) are excluded here so they
+    are never launched, health-checked, or retried again."""
+    allow = os.environ.get("OPENCLI_PROFILES")
+    if not allow:
+        allow = _BROWSER_CONFIG.get("allow_profiles")
+    if isinstance(allow, str):
+        allow = [a.strip() for a in allow.split(",") if a.strip()]
+    if not allow:
+        return profiles
+    return [p for p in profiles if p in allow]
 
 
 def _which(name: str) -> str:
@@ -45,6 +121,163 @@ def fetch_exa(ticker: str, n: int = 6) -> list[dict]:
     return posts
 
 
+def _opencli_all_connected(exe: str) -> list[str]:
+    """ALL connected Browser Bridge profile names, unfiltered."""
+    try:
+        out = subprocess.run([exe, "profile", "list"], capture_output=True, text=True,
+                             encoding="utf-8", errors="replace", timeout=60)
+        return re.findall(r"^\s*([A-Za-z0-9_-]+)(?:\s+default)?\s+—\s+connected", out.stdout, re.M)
+    except Exception:
+        return []
+
+
+def _opencli_connected_profiles(exe: str) -> list[str]:
+    """Connected Browser Bridge profiles, default-DENY filtered to the
+    production allow-list (browser.json / OPENCLI_PROFILES)."""
+    return _filter_allowed(_opencli_all_connected(exe))
+
+
+def _opencli_default_profile(exe: str) -> str | None:
+    try:
+        out = subprocess.run([exe, "profile", "list"], capture_output=True, text=True,
+                             encoding="utf-8", errors="replace", timeout=60)
+        m = re.search(r"^\s*([A-Za-z0-9_-]+)\s+default\s+—\s+connected", out.stdout, re.M)
+        return m.group(1) if m else None
+    except Exception:
+        return None
+
+
+def _profile_health(exe: str, profiles: list[str], force: bool = False) -> tuple[list[str], list[str]]:
+    """Split profiles into (healthy, unhealthy) via a real navigation test.
+
+    A profile is healthy only if `opencli --profile P browser open <url>`
+    actually navigates; profile list / tab list / bind succeeding is not proof.
+    Results are cached for the process lifetime.
+    """
+    nav_url = _health_url()
+    healthy: list[str] = []
+    unhealthy: list[str] = []
+    for p in profiles:
+        if not force and p in _profile_health_cache:
+            (healthy if _profile_health_cache[p] else unhealthy).append(p)
+            continue
+        try:
+            r = subprocess.run(
+                [exe, "--profile", p, "browser", "ohealth", "open", nav_url, "--window", "background"],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=_HEALTH_TIMEOUT_S,
+            )
+            ok = r.returncode == 0
+        except Exception:
+            ok = False
+        _profile_health_cache[p] = ok
+        (healthy if ok else unhealthy).append(p)
+    return healthy, unhealthy
+
+
+def _launch_chrome(url: str | None = None) -> bool:
+    """Launch THE production Chrome by absolute path (detached). Returns False
+    if it cannot be resolved — no other browser is ever launched."""
+    exe = _chrome_exe()
+    if not exe:
+        return False
+    try:
+        flags = subprocess.DETACHED_PROCESS if os.name == "nt" else 0
+        subprocess.Popen([exe, url], creationflags=flags, close_fds=True)
+        return True
+    except Exception:
+        return False
+
+
+def _ensure_opencli_browser(exe: str, wait_s: int = 45) -> tuple[list[str], list[str]]:
+    """Guarantee at least one *healthy* whitelisted profile; return (healthy, unhealthy).
+
+    Recovery ladder (bounded — no infinite relaunch loop):
+      1. If a whitelisted connected profile passes the navigate health check, use it.
+      2. Otherwise launch THE production Chrome once (absolute path) and poll
+         `profile list` until its extension reconnects.
+      3. Retry the health check once. Still nothing healthy -> count one
+         recovery failure; after _MAX_RECOVERY_FAILURES consecutive failures
+         the circuit opens and further calls fail fast instead of relaunching.
+    Non-whitelisted profiles (e.g. retired Edge/vmawp5gu) are ignored and
+    reported once, never health-checked or retried.
+    """
+    global _ensure_fail_streak
+    if _ensure_fail_streak >= _MAX_RECOVERY_FAILURES:
+        raise RuntimeError(
+            "Browser recovery circuit OPEN "
+            f"({_ensure_fail_streak} consecutive recovery failures). Not relaunching Chrome again.\n"
+            "Check manually: Chrome running? Browser Bridge extension connected? "
+            "`opencli profile list` shows the production profile? Then rerun."
+        )
+    healthy: list[str] = []
+    unhealthy: list[str] = []
+    for attempt in (1, 2):
+        raw = _opencli_all_connected(exe)
+        allowed = _filter_allowed(raw)
+        new_ignored = [p for p in raw if p not in allowed and p not in _ignored_profiles_reported]
+        if new_ignored:
+            _ignored_profiles_reported.update(new_ignored)
+            print(f"[browser] non-whitelisted profile(s) ignored: {', '.join(new_ignored)}")
+        if allowed:
+            healthy, unhealthy = _profile_health(exe, allowed, force=(attempt > 1))
+            if healthy:
+                _ensure_fail_streak = 0
+                return healthy, unhealthy
+        if attempt == 1 and _launch_chrome():
+            deadline = time.time() + wait_s
+            while time.time() < deadline:
+                time.sleep(2)
+                if _filter_allowed(_opencli_all_connected(exe)):
+                    break
+    _ensure_fail_streak += 1
+    return healthy, unhealthy
+
+
+def _run_opencli(args: list[str], timeout: int) -> subprocess.CompletedProcess:
+    """Run an opencli command with browser-health-aware profile fallback.
+
+    args[0] must be the opencli executable path. Ensures a healthy browser
+    first (launching Chrome if needed), then tries the default command and —
+    only on attach-type failures — retries with healthy profiles in a
+    background window. Unhealthy profiles are skipped and reported, never
+    retried, so a broken instance can't masquerade as transient flakiness.
+    """
+    healthy, unhealthy = _ensure_opencli_browser(args[0])
+    if unhealthy:
+        print(f"[browser] unhealthy profile(s) skipped (navigate check failed): {', '.join(unhealthy)}")
+    if healthy:
+        print(f"[browser] healthy profile(s): {', '.join(healthy)}")
+    # Chrome-only: the profileless default attempt must target a healthy,
+    # whitelisted profile — otherwise it silently hits opencli's default
+    # (the retired Edge). Skip unless the default profile is proven healthy.
+    default_p = _opencli_default_profile(args[0])
+    attempts = [args] if (default_p is None or default_p in healthy) else []
+    for p in healthy:
+        attempts.append([args[0], "--profile", p] + args[1:] + ["--window", "background"])
+    last: subprocess.CompletedProcess | None = None
+    errs: list[str] = []
+    for i, cmd in enumerate(attempts):
+        last = subprocess.run(cmd, capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", timeout=timeout)
+        if last.returncode == 0:
+            return last
+        err = (last.stderr or "") + (last.stdout or "")
+        errs.append(err[:300])
+        if i + 1 < len(attempts) and any(m in err for m in _ATTACH_ERR_MARKERS):
+            continue
+        break
+    if last is not None and not healthy:
+        raise RuntimeError(
+            "Browser health check failed — no healthy whitelisted Browser Bridge profile.\n"
+            f"  whitelisted-allowed: {', '.join(healthy) or '(none)'} | unhealthy: {', '.join(unhealthy) or '(none)'}\n"
+            f"  last error: {errs[-1][:300]}\n"
+            "Fix: launch Chrome (the only production browser; see browser.json) and ensure "
+            "its Browser Bridge extension is connected."
+        )
+    return last
+
+
 def fetch_opencli(ticker: str, n: int = 15, product: str = "top", extra: str = "", company: str = "") -> list[dict]:
     """Real X posts via OpenCLI (browser session, no cookies needed).
 
@@ -57,8 +290,10 @@ def fetch_opencli(ticker: str, n: int = 15, product: str = "top", extra: str = "
         query = f'{query} OR "{company}"'
     if extra:
         query = f"({query}) {extra}"
-    cmd = [_which("opencli"), "twitter", "search", query, "-f", "json", "--limit", str(n), "--product", product]
-    out = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180)
+    out = _run_opencli(
+        [_which("opencli"), "twitter", "search", query, "-f", "json", "--limit", str(n), "--product", product],
+        timeout=180,
+    )
     if out.returncode != 0:
         raise RuntimeError(
             f"opencli twitter search failed: {out.stderr[:500]}\n"
@@ -95,10 +330,7 @@ def fetch_author_stats(authors: list[str], max_n: int = 12, delay_s: float = 1.5
     stats: dict[str, dict] = {}
     for a in authors[:max_n]:
         try:
-            out = subprocess.run(
-                [exe, "twitter", "profile", a, "-f", "json"],
-                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=90,
-            )
+            out = _run_opencli([exe, "twitter", "profile", a, "-f", "json"], timeout=90)
             if out.returncode == 0:
                 data = json.loads(out.stdout)
                 item = data[0] if isinstance(data, list) else data

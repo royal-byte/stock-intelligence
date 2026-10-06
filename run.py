@@ -244,10 +244,14 @@ def format_report(r: dict) -> str:
         L.append("   无可用快照")
     # ② options
     L.append("② 期权层（yfinance 延迟快照）")
-    L.append(f"   spot {o['spot']}｜ATM IV {o['atm_iv_near']:.1%}（期限斜率 {o['term_slope_vpt']:+.1f}vpt"
-             f"{'（驼峰=近期事件预期）' if (o['term_slope_vpt'] or 0) > 3 else ''}）")
-    L.append(f"   25Δ RR {o['rr25_vpt']:+.1f}vpt｜PC OI {o['pc_oi']}｜PC vol {o['pc_vol']}"
-             f"｜GEX/1% {o['gex_usd_per_1pct']:+,.0f}USD")
+    _iv = f"{o['atm_iv_near']:.1%}" if o.get('atm_iv_near') is not None else 'n/a'
+    _ts = f"{o['term_slope_vpt']:+.1f}" if o.get('term_slope_vpt') is not None else 'n/a'
+    _rr = f"{o['rr25_vpt']:+.1f}" if o.get('rr25_vpt') is not None else 'n/a'
+    _gex = f"{o['gex_usd_per_1pct']:+,.0f}" if o.get('gex_usd_per_1pct') is not None else 'n/a'
+    L.append(f"   spot {o.get('spot', 'n/a')}｜ATM IV {_iv}（期限斜率 {_ts}vpt"
+             f"{'（驼峰=近期事件预期）' if (o.get('term_slope_vpt') or 0) > 3 else ''}）")
+    L.append(f"   25Δ RR {_rr}vpt｜PC OI {o.get('pc_oi', 'n/a')}｜PC vol {o.get('pc_vol', 'n/a')}"
+             f"｜GEX/1% {_gex}USD")
     sub = o.get("substates") or {}
     if sub:
         d, v, p = sub.get("direction", {}), sub.get("volatility", {}), sub.get("positioning", {})

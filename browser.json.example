@@ -1,0 +1,6 @@
+{
+  "_comment": "Copy to browser.json and adjust. Production browser binding for the narrative layer. allow_profiles = default-DENY whitelist (only these Browser Bridge instance ids are used/launched/retried; anything else — e.g. a broken Edge instance — is ignored entirely). chrome_path = the ONLY executable ever launched (absolute path; never 'start chrome', which Windows can redirect to the default browser). health_url = neutral navigation target for the browser health check; the business site (x.com) is a data-source concern, not a browser-health concern. Env overrides: OPENCLI_PROFILES (comma-separated), OPENCLI_CHROME_PATH. Find your instance ids with `opencli profile list` (lines marked 'connected'); update allow_profiles if you reinstall the Browser Bridge extension (instance ids change).",
+  "allow_profiles": ["<your-chrome-instance-id>"],
+  "chrome_path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+  "health_url": "https://www.google.com/"
+}
