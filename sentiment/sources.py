@@ -183,7 +183,7 @@ def _launch_chrome(url: str | None = None) -> bool:
         return False
     try:
         flags = subprocess.DETACHED_PROCESS if os.name == "nt" else 0
-        subprocess.Popen([exe, url], creationflags=flags, close_fds=True)
+        subprocess.Popen([exe] if url is None else [exe, url], creationflags=flags, close_fds=True)
         return True
     except Exception:
         return False
@@ -244,37 +244,32 @@ def _run_opencli(args: list[str], timeout: int) -> subprocess.CompletedProcess:
     retried, so a broken instance can't masquerade as transient flakiness.
     """
     healthy, unhealthy = _ensure_opencli_browser(args[0])
+    if not healthy:
+        raise RuntimeError(
+            "Browser health check failed — no healthy whitelisted Browser Bridge profile. "
+            f"Unhealthy: {', '.join(unhealthy) or '(none)'}. "
+            "Check Chrome and its Browser Bridge extension."
+        )
     if unhealthy:
         print(f"[browser] unhealthy profile(s) skipped (navigate check failed): {', '.join(unhealthy)}")
-    if healthy:
-        print(f"[browser] healthy profile(s): {', '.join(healthy)}")
+    print(f"[browser] healthy profile(s): {', '.join(healthy)}")
     # Chrome-only: the profileless default attempt must target a healthy,
     # whitelisted profile — otherwise it silently hits opencli's default
     # (the retired Edge). Skip unless the default profile is proven healthy.
     default_p = _opencli_default_profile(args[0])
-    attempts = [args] if (default_p is None or default_p in healthy) else []
+    attempts = [args] if default_p in healthy else []
     for p in healthy:
         attempts.append([args[0], "--profile", p] + args[1:] + ["--window", "background"])
     last: subprocess.CompletedProcess | None = None
-    errs: list[str] = []
     for i, cmd in enumerate(attempts):
         last = subprocess.run(cmd, capture_output=True, text=True,
                               encoding="utf-8", errors="replace", timeout=timeout)
         if last.returncode == 0:
             return last
         err = (last.stderr or "") + (last.stdout or "")
-        errs.append(err[:300])
         if i + 1 < len(attempts) and any(m in err for m in _ATTACH_ERR_MARKERS):
             continue
         break
-    if last is not None and not healthy:
-        raise RuntimeError(
-            "Browser health check failed — no healthy whitelisted Browser Bridge profile.\n"
-            f"  whitelisted-allowed: {', '.join(healthy) or '(none)'} | unhealthy: {', '.join(unhealthy) or '(none)'}\n"
-            f"  last error: {errs[-1][:300]}\n"
-            "Fix: launch Chrome (the only production browser; see browser.json) and ensure "
-            "its Browser Bridge extension is connected."
-        )
     return last
 
 
